@@ -2,6 +2,7 @@ module T2 where
 
 import Data.List
 import ParserLambda --(lexer, parserlamb, LamExp(LamVar, LamAbs, LamApp))
+import Foreign (free)
 
 
 ----------------------------------- Tipos -----------------------------------
@@ -21,28 +22,28 @@ type Index = [(Char,Int)]
 
 -------------------------------- applyBruijn -------------------------------
 
--- Conversão LamExp para LamExpNL = LamExpo NameLess Lambda
+-- Conversão LamExp para LamExpNL = LamExp NameLess 
 applyBruijn :: LamExp -> Index -> LamExpNL
-applyBruijn (LamVar x) c   = LamVarNL (findfirst x c)
+applyBruijn (LamVar x) i   = LamVarNL (findfirstInt x i)
 
-applyBruijn (LamAbs x t) c = let t' = applyBruijn t (insertChar x c) 
+applyBruijn (LamAbs x t) i = let t' = applyBruijn t (insertChar x i)
                           in  LamAbsNL t'
-applyBruijn (LamApp t1 t2) c = let t1' = applyBruijn t1 c
-                                   t2' = applyBruijn t2 c
-                          in LamAppNL t1' t2'                             
+applyBruijn (LamApp t1 t2) i = let t1' = applyBruijn t1 i
+                                   t2' = applyBruijn t2 i
+                          in LamAppNL t1' t2'
 
 -- Insere um Char no Index e atualiza o Index
 insertChar :: Char -> Index -> Index
-insertChar x c = [(fst a,snd a +1) |  a <- c]++[(x,0)]
+insertChar x i = (x,0) : [(fst a,snd a+1) |  a <- i]
 
 -- Pega primeiro Int do Char correspondente
-findfirst :: Char -> Index -> Int
-findfirst x [] = error "Variable not in Context"
-findfirst x c = if x == fst (last c) then snd(last c) else findfirst x (init c)
+findfirstInt :: Char -> Index -> Int
+findfirstInt x [] = error "Variable not in Context"
+findfirstInt x (i:is) = if x == fst i then snd i else findfirstInt x is
 
 -- Pega primeiro Char do Int correspondente
-findfirst' :: Int -> Index -> Char
-findfirst' x c = if x == snd (last c) then fst(last c) else findfirst' x (init c)
+findfirstChar :: Int -> Index -> Char
+findfirstChar x (i:is) = if x == snd i then fst i else findfirstChar x is
 
 ----------------------------------------------------------------------------
 ------------------------------- Restorenames -------------------------------
@@ -50,23 +51,23 @@ findfirst' x c = if x == snd (last c) then fst(last c) else findfirst' x (init c
 
 -- Conversão LamExpNL para LamExp
 restorenames :: LamExpNL -> Index -> LamExp
-restorenames (LamVarNL x) c = LamVar (findfirst' x c)
-restorenames (LamAbsNL t) c = let a = geraChar c ['a'..'z']
-                                  t' = restorenames t (insertChar a c)
+restorenames (LamVarNL x) i = LamVar (findfirstChar x i)
+restorenames (LamAbsNL t) i = let a = genChar i ['a'..'z']
+                                  t' = restorenames t (insertChar a i)
                            in LamAbs a t'
-restorenames (LamAppNL t1 t2) c = let t1' = restorenames t1 c
-                                      t2' = restorenames t2 c
-                               in LamApp t1' t2' 
+restorenames (LamAppNL t1 t2) i = let t1' = restorenames t1 i
+                                      t2' = restorenames t2 i
+                               in LamApp t1' t2'
 
 -- verifica se o char c está no Index
-verificaCC :: Index -> Char -> Bool
-verificaCC [] c = False
-verificaCC ((a,_):b) c = (a == c) || verificaCC b c
+checkCharInIndex :: Index -> Char -> Bool
+checkCharInIndex [] c = False
+checkCharInIndex ((a,_):is) c = (a == c) || checkCharInIndex is c
 
 -- gera uma var nova que não está no Index 
-geraChar :: Index -> [Char] -> Char
-geraChar c [] = error "todas as letras usadas"
-geraChar c (a:b) = if verificaCC c a then geraChar c b else a
+genChar :: Index -> [Char] -> Char
+genChar i [] = error "todas as letras usadas"
+genChar i (a:as) = if checkCharInIndex i a then genChar i as else a
 
 
 ----------------------------------------------------------------------------
@@ -74,25 +75,25 @@ geraChar c (a:b) = if verificaCC c a then geraChar c b else a
 ----------------------------------------------------------------------------
 
 -- Shifting recebe tres parametros: o valor de incremento "d", o valor de
--- cutoff "c" (a partir de qual numero deve ser incrementado e o LamExpo)
+-- cutoff "c" (a partir de qual numero deve ser incrementado e o LamExp)
 
 shifting :: Int -> Int -> LamExpNL -> LamExpNL
 shifting d c (LamVarNL k) = if k < c
                          then LamVarNL k
                          else LamVarNL (k + d)
-shifting d c (LamAbsNL t) = LamAbsNL(shifting d (c+1) t)
-shifting d c (LamAppNL t1 t2) = LamAppNL (shifting d c t1)(shifting d c t2)
+shifting d c (LamAbsNL t) = LamAbsNL (shifting d (c+1) t)
+shifting d c (LamAppNL t1 t2) = LamAppNL (shifting d c t1) (shifting d c t2)
 
 
 ----------------------------------------------------------------------------
 ------------------------------- Substitution -------------------------------
 ----------------------------------------------------------------------------
 
--- Busca as variáveis livres do Termo
--- freeVars :: LamExp -> [Char]
--- freeVars (LamVar x)     = [x] 
--- freeVars (LamAbs x t)   = delete x (freeVars t)
--- freeVars (LamApp t1 t2) = freeVars t1 ++ freeVars t2
+-- Busca as variáveis livres na expressão
+freeVars :: LamExp -> [Char]
+freeVars (LamVar x)     = [x]
+freeVars (LamAbs x t)   = delete x (freeVars t)
+freeVars (LamApp t1 t2) = freeVars t1 ++ freeVars t2
 
 -- -- Faz a substituição de um Termo
 -- subs :: Char -> LamExp -> LamExp -> LamExp
@@ -125,13 +126,12 @@ shifting d c (LamAppNL t1 t2) = LamAppNL (shifting d c t1)(shifting d c t2)
 ----------------------------------------------------------------------------
 
 -- Busca as variáveis livres do Termo nameless
--- freeVarsNL :: LamExpNL -> Int -> [Int]
--- freeVarsNL (LamVarNL x) t2     = [x | x >= t2]
--- freeVarsNL (LamAbsNL t0) t2  = freeVarsNL t0 (t2 + 1)
--- freeVarsNL (LamAppNL t0 t1) t2 = freeVarsNL t0 t2 ++ freeVarsNL t0 t2
+freeVarsNL :: LamExpNL -> Int -> [Int]
+freeVarsNL (LamVarNL x) t2     = [x | x >= t2]
+freeVarsNL (LamAbsNL t0) t2  = freeVarsNL t0 (t2 + 1)
+freeVarsNL (LamAppNL t0 t1) t2 = freeVarsNL t0 t2 ++ freeVarsNL t0 t2
 
---Tem muito mais problema aqui?
--- erro brabo aqui
+-- Faz a substituição de um Termo nameless
 subsNL :: (Int, LamExpNL) -> LamExpNL -> LamExpNL
 subsNL (j, s) (LamVarNL k) = if k == j then s else LamVarNL k
 subsNL (j, s) (LamAbsNL t1) = LamAbsNL (subsNL (j+1, shifting 1 0 s) t1)
@@ -148,12 +148,12 @@ isValNL _         = True
 
 -- Semantica operacional Call-by-value (ordem de avaliacao)
 evalNL :: LamExpNL -> LamExpNL
-evalNL (LamAppNL (LamAbsNL t12) t2) = if isValNL t2 then subsNL (0, t2) t12 
+evalNL (LamAppNL (LamAbsNL t12) t2) = if isValNL t2 then subsNL (0, t2) t12
                             else let t2' = evalNL t2
                                  in LamAppNL (LamAbsNL t12) t2'
 evalNL (LamAppNL t1 t2) = let t1'= evalNL t1
                    in LamAppNL t1' t2
-evalNL x = x     
+evalNL x = x
 
 -- Funcao que aplica recursivamente eval ate que nao tenha mais redex
 interpretNL :: LamExpNL -> LamExpNL
@@ -163,9 +163,12 @@ interpretNL t = let t' = evalNL t
 -- Funcao principal que aplica Brujin e depois interpreta a expressao
 evalBruijn :: LamExp -> LamExpNL
 evalBruijn t = interpretNL (applyBruijn t varList)
+       where varList = zip (freeVars t) [0..]
 
+-- Funcao principal que aplica Brujin e depois interpreta a expressao, retornando o resultado com os nomes originais
 evalBruijn' :: LamExp -> LamExp
 evalBruijn' t = restorenames (interpretNL (applyBruijn t varList)) varList
+       where varList = zip (freeVars t) [0..]
 
 ----------------------------------------------------------------------------
 --------------------------- Variáveis e Exmplos ----------------------------
@@ -174,8 +177,7 @@ evalBruijn' t = restorenames (interpretNL (applyBruijn t varList)) varList
 -- Variáveis
 -- t1 = LamApp (LamAbs 'b' (LamApp (LamVar 'b') (LamAbs 'x' (LamVar 'b')))) (LamApp (LamVar 'a') (LamAbs 'z' (LamVar 'a')))
 
-varList :: Index
-varList = [ ('z', 2), ('y', 1), ('x', 0)]
+-- Lista que contem o nome da variável e o seu índice de Bruijn
 
 -- termot2 :: LamExpNL
 -- termot2 = LamAppNL (LamAppNL (LamVarNL 1) (LamAbsNL (LamVarNL 2))) (LamAbsNL (LamAppNL (LamVarNL 2) (LamAbsNL (LamVarNL 3))))
